@@ -1,33 +1,18 @@
 {
-    "manifest_version": 3,
-    "name": "Age of Olympia Tracker",
-    "version": "1.0",
-    "description": "Suivez l'évolution de vos stats sur Age of Olympia.",
-    "permissions": ["storage", "scripting", "alarms"],
-    "background": {
-      "service_worker": "background.js"
-    },
-    "action": {
-      "default_popup": "popup.html",
-      "default_icon": {
-        "16": "icon.png",
-        "48": "icon.png",
-        "128": "icon.png"
-      }
-    },
-    "icons": {
-      "16": "icon.png",
-      "48": "icon.png",
-      "128": "icon.png"
-    },
-    "host_permissions": [
-      "https://age-of-olympia.net/*"
-    ],
-    "content_scripts": [
-    {
-        "matches": ["https://age-of-olympia.net/*"],
-        "js": ["content.js"]
-    }
-    ]
+  "manifest_version": 2,
+  "name": "Age of Olympia Tracker",
+  "version": "1.0",
+  "description": "Suivez l'évolution de vos stats sur Age of Olympia.",
+  "permissions": ["storage", "<all_urls>"],
+  "background": { "scripts": ["background.js"], "persistent": false },
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icon.png", "48": "icon.png", "128": "icon.png" }
+  },
+  "icons": { "16": "icon.png", "48": "icon.png", "128": "icon.png" },
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"] }],
+  "web_accessible_resources": ["icon.png"],
+  "browser_specific_settings": {
+    "gecko": { "id": "aootracker@example.com", "strict_min_version": "78.0" }
   }
-  
+}

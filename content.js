@@ -224,6 +224,23 @@ async function fetchAllCharacters() {
   return characters;
 }
 
+async function downloadAsset(url, type) {
+  const response = await fetch('http://localhost:3001/api/assets', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ url, type })
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to download asset: ${response.statusText}`);
+  }
+  
+  const data = await response.json();
+  return data.path;
+}
+
 const fetchPrivateForumForFaction = async () => {
   try {
     console.log("[content.js] Fetching private forum for faction...");
@@ -534,6 +551,277 @@ const fetchRPForumData = async () => {
   }
 };
 
+const fetchMapData = async () => {
+  try {
+    // Use the index page instead of map.php
+    const response = await fetch("https://age-of-olympia.net/index.php", {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch map page");
+    }
+
+    const text = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "text/html");
+
+    // Get the map SVG element - updated selector to match actual HTML
+    const mapSvg = doc.querySelector("#svg-container svg");
+    if (!mapSvg) {
+      throw new Error("Map SVG not found");
+    }
+
+    // Extract grid coordinates and build a coordinate mapping
+    const coordsMap = new Map();
+    Array.from(doc.querySelectorAll(".case")).forEach(cell => {
+      const coords = cell.getAttribute("data-coords");
+      if (coords) {
+        const [x, y] = coords.split(",").map(Number);
+        const pixelX = parseInt(cell.getAttribute("x") || "0");
+        const pixelY = parseInt(cell.getAttribute("y") || "0");
+        coordsMap.set(`${pixelX},${pixelY}`, { x, y });
+      }
+    });
+
+    // Extract tiles with correct coordinates
+    const tiles = Array.from(doc.querySelectorAll("[data-table='tiles']")).map(tile => {
+      const pixelX = parseInt(tile.getAttribute("x") || "0");
+      const pixelY = parseInt(tile.getAttribute("y") || "0");
+      const coords = coordsMap.get(`${pixelX},${pixelY}`) || { x: 0, y: 0 };
+      return {
+        id: tile.id,
+        x: coords.x,
+        y: coords.y,
+        pixelX,
+        pixelY,
+        type: "tile",
+        href: tile.getAttribute("href") || null
+      };
+    });
+
+    // Extract map elements with correct coordinates
+    const elements = Array.from(doc.querySelectorAll("[data-table='elements']")).map(element => {
+      const pixelX = parseInt(element.getAttribute("x") || "0");
+      const pixelY = parseInt(element.getAttribute("y") || "0");
+      const coords = coordsMap.get(`${pixelX},${pixelY}`) || { x: 0, y: 0 };
+      return {
+        x: coords.x,
+        y: coords.y,
+        pixelX,
+        pixelY,
+        type: "element",
+        opacity: parseFloat(element.style.opacity || "1"),
+        href: element.getAttribute("href") || null
+      };
+    });
+
+    // Extract players with correct coordinates
+    const players = Array.from(doc.querySelectorAll("[data-table='players']")).map(player => {
+      const pixelX = parseInt(player.getAttribute("x") || "0");
+      const pixelY = parseInt(player.getAttribute("y") || "0");
+      const coords = coordsMap.get(`${pixelX},${pixelY}`) || { x: 0, y: 0 };
+      return {
+        id: player.id,
+        x: coords.x,
+        y: coords.y,
+        pixelX,
+        pixelY,
+        type: "player",
+        href: player.getAttribute("href") || null
+      };
+    });
+
+    // Extract walls with correct coordinates
+    const walls = Array.from(doc.querySelectorAll("[data-table='walls']")).map(wall => {
+      const pixelX = parseInt(wall.getAttribute("x") || "0");
+      const pixelY = parseInt(wall.getAttribute("y") || "0");
+      const coords = coordsMap.get(`${pixelX},${pixelY}`) || { x: 0, y: 0 };
+      return {
+        id: wall.id,
+        x: coords.x,
+        y: coords.y,
+        pixelX,
+        pixelY,
+        type: "wall",
+        href: wall.getAttribute("href") || null
+      };
+    });
+
+    // Get background image if any
+    const background = doc.querySelector("#map-background")?.getAttribute("href") || null;
+
+    const mapData = {
+      tiles,
+      elements,
+      players,
+      walls,
+      background
+    };
+
+    console.log("[content.js] Map data extracted:", mapData);
+    return mapData;
+  } catch (error) {
+    console.error("[content.js] Error fetching map data:", error);
+    throw error;
+  }
+}
+
+async function fetchReputationData(id) {
+  console.log(`[content.js] fetchReputationData: start for targetId=${id}`);
+  try {
+    const response = await fetch(`${baseURLCharacter}${id}&reputation`);
+    if (!response.ok) {
+      console.log(`[content.js] fetchReputationData: response not OK for targetId=${id} (status ${response.status})`);
+      return null;
+    }
+    const text = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "text/html");
+
+    const findSectionTable = (sectionTitle) => {
+      const headers = Array.from(doc.querySelectorAll("h2"));
+      const header = headers.find((h) => h.textContent?.trim().includes(sectionTitle));
+      if (!header) {
+        console.warn(`[content.js] Reputation section not found: ${sectionTitle}`);
+        return null;
+      }
+      let el = header.nextElementSibling;
+      while (el && el.tagName !== "TABLE") el = el.nextElementSibling;
+      if (!el) {
+        console.warn(`[content.js] Table not found after header: ${sectionTitle}`);
+      }
+      return el || null;
+    };
+
+    const parseRows = (table, mapRow) => {
+      if (!table) return [];
+      const rows = Array.from(table.querySelectorAll("tr"));
+      // Skip header if present
+      const dataRows = rows.slice(1);
+      console.log(`[content.js] parseRows: found ${dataRows.length} rows to parse`);
+      return dataRows
+        .map((tr, idx) => {
+          try {
+            const tds = tr.querySelectorAll("td");
+            if (!tds || tds.length < 5) {
+              console.warn(`[content.js] Row ${idx}: unexpected column count (${tds?.length || 0})`);
+              return null;
+            }
+            return mapRow(tds);
+          } catch (e) {
+            console.error(`[content.js] Error parsing row ${idx}:`, e);
+            return null;
+          }
+        })
+        .filter(Boolean);
+    };
+
+    // Kills section: "Importateur de viandes pour les Limbes"
+    const killsTable = findSectionTable("Importateur de viandes pour les Limbes");
+    const kills = parseRows(killsTable, (cells) => {
+      const links = cells[2]?.querySelectorAll("a[href*='infos.php?targetId=']") || [];
+      const killerA = links[0] || null;
+      const victimA = links[1] || null;
+      const killerHref = killerA?.getAttribute("href") || "";
+      const victimHref = victimA?.getAttribute("href") || "";
+      const killerId = killerHref.match(/targetId=(-?\d+)/)?.[1] || null;
+      const victimId = victimHref.match(/targetId=(-?\d+)/)?.[1] || null;
+      const textCol = cells[2]?.textContent || "";
+      const ranks = Array.from(textCol.matchAll(/\(rang\s+(\d+)\)/g)).map((m) => m[1]);
+      return {
+        avatarUrl: cells[0]?.querySelector("img")?.src || null,
+        date: cells[1]?.textContent?.trim() || null,
+        killerName: killerA?.textContent?.trim() || null,
+        killerId: killerId ? parseInt(killerId, 10) : null,
+        killerRank: ranks[0] || null,
+        victimName: victimA?.textContent?.trim() || null,
+        victimId: victimId ? parseInt(victimId, 10) : null,
+        victimRank: ranks[1] || null,
+        location: cells[3]?.textContent?.trim() || null,
+        experience: cells[4]?.textContent?.trim() || null,
+      };
+    });
+    console.log(`[content.js] fetchReputationData: parsed kills=${kills.length}`);
+
+    // Assists section: "Assistant du Roi des Enfers"
+    const assistsTable = findSectionTable("Assistant du Roi des Enfers");
+    const assists = parseRows(assistsTable, (cells) => {
+      const links = cells[2]?.querySelectorAll("a[href*='infos.php?targetId=']") || [];
+      const assisterA = links[0] || null;
+      const victimA = links[1] || null;
+      const assisterHref = assisterA?.getAttribute("href") || "";
+      const victimHref = victimA?.getAttribute("href") || "";
+      const assisterId = assisterHref.match(/targetId=(-?\d+)/)?.[1] || null;
+      const victimId = victimHref.match(/targetId=(-?\d+)/)?.[1] || null;
+      const textCol = cells[2]?.textContent || "";
+      const ranks = Array.from(textCol.matchAll(/\(rang\s+(\d+)\)/g)).map((m) => m[1]);
+      return {
+        avatarUrl: cells[0]?.querySelector("img")?.src || null,
+        date: cells[1]?.textContent?.trim() || null,
+        assisterName: assisterA?.textContent?.trim() || null,
+        assisterId: assisterId ? parseInt(assisterId, 10) : null,
+        assisterRank: ranks[0] || null,
+        victimName: victimA?.textContent?.trim() || null,
+        victimId: victimId ? parseInt(victimId, 10) : null,
+        victimRank: ranks[1] || null,
+        location: cells[3]?.textContent?.trim() || null,
+        experience: cells[4]?.textContent?.trim() || null,
+      };
+    });
+    console.log(`[content.js] fetchReputationData: parsed assists=${assists.length}`);
+
+    // Deaths section: "Rameur sur le Styx"
+    const deathsTable = findSectionTable("Rameur sur le Styx");
+    const deaths = parseRows(deathsTable, (cells) => {
+      const links = cells[2]?.querySelectorAll("a[href*='infos.php?targetId=']") || [];
+      const killerA = links[0] || null;
+      const victimA = links[1] || null;
+      const killerHref = killerA?.getAttribute("href") || "";
+      const victimHref = victimA?.getAttribute("href") || "";
+      const killerId = killerHref.match(/targetId=(-?\d+)/)?.[1] || null;
+      const victimId = victimHref.match(/targetId=(-?\d+)/)?.[1] || null;
+      const textCol = cells[2]?.textContent || "";
+      const ranks = Array.from(textCol.matchAll(/\(rang\s+(\d+)\)/g)).map((m) => m[1]);
+      return {
+        avatarUrl: cells[0]?.querySelector("img")?.src || null,
+        date: cells[1]?.textContent?.trim() || null,
+        killerName: killerA?.textContent?.trim() || null,
+        killerId: killerId ? parseInt(killerId, 10) : null,
+        killerRank: ranks[0] || null,
+        victimName: victimA?.textContent?.trim() || null,
+        victimId: victimId ? parseInt(victimId, 10) : null,
+        victimRank: ranks[1] || null,
+        location: cells[3]?.textContent?.trim() || null,
+        experience: cells[4]?.textContent?.trim() || null,
+      };
+    });
+    console.log(`[content.js] fetchReputationData: parsed deaths=${deaths.length}`);
+
+    console.log(`[content.js] fetchReputationData: success for targetId=${id}`);
+    return { kills, assists, deaths };
+  } catch (error) {
+    console.error(`[content.js] fetchReputationData: error for targetId=${id}:`, error);
+    return null;
+  }
+}
+
+async function handleFetchReputation(request, sender, sendResponse) {
+  try {
+    console.log(`[content.js] handleFetchReputation: start targetId=${request?.targetId}`);
+    const reputationData = await fetchReputationData(request.targetId);
+    console.log(`[content.js] handleFetchReputation: done targetId=${request?.targetId} ->`, {
+      kills: reputationData?.kills?.length || 0,
+      assists: reputationData?.assists?.length || 0,
+      deaths: reputationData?.deaths?.length || 0,
+    });
+    sendResponse(reputationData);
+  } catch (e) {
+    console.error(`[content.js] handleFetchReputation: error targetId=${request?.targetId}:`, e);
+    sendResponse({ error: e?.message || 'unknown error' });
+  }
+}
+
 function parseAttributes(html) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
@@ -594,134 +882,247 @@ function parseAttributes(html) {
   return attributes;
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log("[content.js] Received message:", message);
+function handleFetchRankings(request, sender, sendResponse) {
+  console.log("[content.js] Received FETCH_RANKINGS message");
 
-  if (message.type === "FETCH_ATTRIBUTES") {
-    const responses = {};
+  if (!window.location.href.includes("classements.php")) {
+    console.error("[content.js] Not on rankings page");
+    sendResponse({ error: "Not on rankings page" });
+    return true;
+  }
 
-    if (window.location.href.includes("index.php")) {
+  const table = document.querySelector("table.marbre");
+  if (!table) {
+    console.error("[content.js] Rankings table not found.");
+    sendResponse({ error: "Rankings table not found" });
+    return true;
+  }
+
+  const rankings = [];
+  const rows = table.querySelectorAll("tr");
+  rows.forEach((row, index) => {
+    if (index === 0) return; // Skip header row
+    const columns = row.querySelectorAll("td");
+    if (columns.length >= 5) { // Ensure we have enough columns
+      const targetIdMatch = columns[2]?.querySelector("a")?.getAttribute("href")?.match(/targetId=(\d+)/);
+      const xpText = columns[4]?.innerText.trim();
+      
+      if (targetIdMatch && xpText) {
+        const targetId = targetIdMatch[1];
+        const xp = parseInt(xpText.replace(/,/g, ''), 10); // Remove commas if present
+        
+        if (!isNaN(xp)) {
+          rankings.push({
+            targetId,
+            xp
+          });
+        }
+      }
+    }
+  });
+
+  console.log("[content.js] Parsed rankings data:", rankings);
+  sendResponse({ rankings });
+  return true;
+}
+
+const handleFetchAttributes = async (request, sender, sendResponse) => {
+  console.log("[content.js] Received FETCH_ATTRIBUTES message");
+
+  const responses = {};
+
+  // Function to fetch attributes from index.php
+  const fetchIndexAttributes = () => {
+    return new Promise((resolve) => {
       console.log("[content.js] Fetching attributes for the logged-in character...");
 
       const caracButton = document.querySelector("#show-caracs");
       if (!caracButton) {
         console.error("[content.js] Caractéristiques button not found.");
-        responses.indexAttributesError = "Caractéristiques button not found on index.php";
-      } else {
-        caracButton.click();
-
-        const observer = new MutationObserver((mutations, observerInstance) => {
-          const loadCaracsDiv = document.querySelector("#load-caracs");
-          if (loadCaracsDiv && loadCaracsDiv.innerHTML.trim() !== "") {
-            console.log("[content.js] Caractéristiques loaded:", loadCaracsDiv.innerHTML);
-
-            const attributes = parseAttributes(loadCaracsDiv.innerHTML);
-            console.log("[content.js] Parsed attributes for logged-in character:", attributes);
-
-            responses.indexAttributes = attributes;
-
-            observerInstance.disconnect();
-
-            if (responses.rankings || responses.rankingsError) {
-              sendResponse(responses);
-            }
-          }
-        });
-
-        observer.observe(document.body, {
-          childList: true,
-          subtree: true,
-        });
+        resolve({ error: "Caractéristiques button not found on index.php" });
+        return;
       }
-    }
 
-    if (window.location.href.includes("classements.php")) {
-      console.log("[content.js] Fetching rankings data...");
+      caracButton.click();
 
-      const table = document.querySelector("table.marbre");
-      if (!table) {
-        console.error("[content.js] Rankings table not found.");
-        responses.rankingsError = "Rankings table not found on classements.php";
-      } else {
-        const characters = [];
-        const rows = table.querySelectorAll("tr");
-        rows.forEach((row, index) => {
-          if (index === 0) return;
-          const columns = row.querySelectorAll("td");
-          if (columns.length > 0) {
-            const character = {
-              rank: columns[0]?.innerText.trim(),
-              name: columns[1]?.innerText.trim(),
-              targetId: columns[2]?.querySelector("a")?.getAttribute("href")?.match(/targetId=(\d+)/)?.[1],
-              reputation: columns[3]?.innerText.trim(),
-              xp: parseInt(columns[4]?.innerText.trim(), 10),
-            };
-            characters.push(character);
-          }
-        });
+      const observer = new MutationObserver((mutations, observerInstance) => {
+        const loadCaracsDiv = document.querySelector("#load-caracs");
+        if (loadCaracsDiv && loadCaracsDiv.innerHTML.trim() !== "") {
+          console.log("[content.js] Caractéristiques loaded:", loadCaracsDiv.innerHTML);
 
-        console.log("[content.js] Parsed rankings data:", characters);
-        responses.rankings = characters;
+          const attributes = parseAttributes(loadCaracsDiv.innerHTML);
+          console.log("[content.js] Parsed attributes for logged-in character:", attributes);
 
-        if (responses.indexAttributes || responses.indexAttributesError) {
-          sendResponse(responses);
+          observerInstance.disconnect();
+          resolve({ attributes });
         }
-      }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+
+      // Set a timeout to prevent hanging
+      setTimeout(() => {
+        observer.disconnect();
+        resolve({ error: "Timeout waiting for attributes to load" });
+      }, 5000);
+    });
+  };
+
+  // Function to fetch rankings data
+  const fetchRankings = () => {
+    console.log("[content.js] Fetching rankings data...");
+
+    const table = document.querySelector("table.marbre");
+    if (!table) {
+      console.error("[content.js] Rankings table not found.");
+      return { error: "Rankings table not found on classements.php" };
     }
 
-    return true;
+    const characters = [];
+    const rows = table.querySelectorAll("tr");
+    rows.forEach((row, index) => {
+      if (index === 0) return;
+      const columns = row.querySelectorAll("td");
+      if (columns.length > 0) {
+        const character = {
+          rank: columns[0]?.innerText.trim(),
+          name: columns[1]?.innerText.trim(),
+          targetId: columns[2]?.querySelector("a")?.getAttribute("href")?.match(/targetId=(\d+)/)?.[1],
+          reputation: columns[3]?.innerText.trim(),
+          xp: parseInt(columns[4]?.innerText.trim(), 10),
+        };
+        characters.push(character);
+      }
+    });
+
+    console.log("[content.js] Parsed rankings data:", characters);
+    return { characters };
+  };
+
+  // If we're on index.php, fetch attributes
+  if (window.location.href.includes("index.php")) {
+    const indexResult = fetchIndexAttributes();
+    if (indexResult.attributes) {
+      responses.attributes = indexResult.attributes;
+    } else if (indexResult.error) {
+      responses.error = indexResult.error;
+    }
   }
 
-  if (message.type === "FETCH_LOGS") {
-      console.log("[content.js] Fetching logs...");
-      fetchLogsPage().then((logs) => {
-          console.log("[content.js] Sending logs back to background script");
-          sendResponse({ logs });
-      }).catch((error) => {
-          console.error("[content.js] Error fetching logs:", error);
-          sendResponse({ error: "Failed to fetch logs" });
-      });
+  // If we're on classements.php, fetch rankings
+  if (window.location.href.includes("classements.php")) {
+    const rankingsResult = fetchRankings();
+    if (rankingsResult.characters) {
+      responses.rankings = rankingsResult.characters;
+    } else if (rankingsResult.error) {
+      responses.error = rankingsResult.error;
+    }
+  }
+
+  // Send response back
+  sendResponse(responses);
+  return true;
+};
+
+const handleFetchLogs = async (request, sender, sendResponse) => {
+  console.log("[content.js] Fetching logs...");
+  try {
+    const logs = await fetchLogsPage();
+    console.log("[content.js] Sending logs back to background script:", logs);
+    sendResponse({ logs });
+  } catch (error) {
+    console.error("[content.js] Error fetching logs:", error);
+    sendResponse({ error: "Failed to fetch logs" });
+  }
+  return true;
+};
+
+const handleFetchAllCharacters = async (request, sender, sendResponse) => {
+  console.log("[content.js] Fetching all characters...");
+  try {
+    const characters = await fetchAllCharacters();
+    console.log("[content.js] Sending characters back to background script");
+    sendResponse({ characters });
+  } catch (error) {
+    console.error("[content.js] Error fetching characters:", error);
+    sendResponse({ error: "Failed to fetch characters" });
+  }
+  return true;
+};
+
+const handleFetchPrivateForum = async (request, sender, sendResponse) => {
+  try {
+    const forumData = await fetchPrivateForumData();
+    sendResponse(forumData);
+  } catch (error) {
+    console.error("[content.js] Error fetching private forum:", error);
+    sendResponse({ error: "Failed to fetch private forum data" });
+  }
+  return true;
+};
+
+const handleFetchRPForum = async (request, sender, sendResponse) => {
+  try {
+    const forumData = await fetchRPForumData();
+    sendResponse(forumData);
+  } catch (error) {
+    console.error("[content.js] Error fetching private forum:", error);
+    sendResponse({ error: "Failed to fetch private forum data" });
+  }
+  return true;
+};
+
+const handleFetchMap = async (request, sender, sendResponse) => {
+  try {
+    const mapData = await fetchMapData();
+    sendResponse(mapData);
+  } catch (error) {
+    console.error("[content.js] Error fetching map data:", error);
+    sendResponse({ error: "Failed to fetch map data" });
+  }
+  return true;
+};
+
+// Message listener
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log("[content.js] Received message:", message);
+
+  switch (message.type) {
+    case "FETCH_ATTRIBUTES":
+      handleFetchAttributes(message, sender, sendResponse);
+      return true;
+
+    case "FETCH_RANKINGS":
+      handleFetchRankings(message, sender, sendResponse);
+      return true;
+
+    case "FETCH_LOGS":
+      handleFetchLogs(message, sender, sendResponse);
+      return true;
+
+    case "FETCH_ALL_CHARACTERS":
+      handleFetchAllCharacters(message, sender, sendResponse);
+      return true;
+
+    case "FETCH_FORUM_PRIVATE":
+      handleFetchPrivateForum(message, sender, sendResponse);
+      return true;
+
+    case "FETCH_FORUM_RP":
+      handleFetchRPForum(message, sender, sendResponse);
+      return true;
+
+    case "FETCH_MAP":
+      handleFetchMap(message, sender, sendResponse);
+      return true;
+
+    case "FETCH_REPUTATION":
+      handleFetchReputation(message, sender, sendResponse);
       return true;
   }
-
-  if (message.type === "FETCH_ALL_CHARACTERS") {
-    console.log("[content.js] Fetching all characters...");
-    fetchAllCharacters()
-      .then((characters) => {
-        console.log("[content.js] Sending characters back to background script");
-        sendResponse({ characters });
-      })
-      .catch((error) => {
-        console.error("[content.js] Error fetching characters:", error);
-        sendResponse({ error: "Failed to fetch characters" });
-      });
-    return true;
-  }
-
-  if (message.type === "FETCH_FORUM_PRIVATE") {
-    fetchPrivateForumData()
-      .then((forumData) => {
-        sendResponse(forumData);
-      })
-      .catch((error) => {
-        console.error("[content.js] Error fetching private forum:", error);
-        sendResponse({ error: "Failed to fetch private forum data" });
-      });
-    return true;
-  }
-
-  if (message.type === "FETCH_FORUM_RP") {
-    fetchRPForumData()
-      .then((forumData) => {
-        sendResponse(forumData);
-      })
-      .catch((error) => {
-        console.error("[content.js] Error fetching private forum:", error);
-        sendResponse({ error: "Failed to fetch private forum data" });
-      });
-    return true;
-  }
-
 });
 
 console.log("[content.js] Script injected");
