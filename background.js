@@ -1017,25 +1017,12 @@ const handlers = {
   AUTO_SYNC: (msg, sender) => handleAutoSync({ url: msg.url, tabId: sender?.tab?.id }),
   UPDATE_MISSIVE_STATUS: (msg) => updateMissiveStatus(msg),
   GET_MISSIVES: () => getMissives(),
-  GET_MDJ_RECENT: (msg) => getMdjRecent(msg),
 };
 
 async function getMissives() {
   await hydrate;
   const res = await apiFetch("/api/missives");
   if (!res.ok) throw new Error(`Failed to fetch missives: HTTP ${res.status}`);
-  return res.json();
-}
-
-async function getMdjRecent({ limit = 100, sinceDays } = {}) {
-  await hydrate;
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (sinceDays != null) {
-    const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
-    params.set("since", since.toISOString());
-  }
-  const res = await apiFetch(`/api/mdj?${params.toString()}`);
-  if (!res.ok) throw new Error(`Failed to fetch MDJ history: HTTP ${res.status}`);
   return res.json();
 }
 
