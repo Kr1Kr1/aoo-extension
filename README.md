@@ -14,6 +14,17 @@ The **Age of Olympia Data Scraper** simplifies the process of gathering in-game 
 - **User-Friendly Interface**: Start, pause, or stop scraping with intuitive controls.
 - **Secure and Private**: All operations run locally in the browser, ensuring privacy.
 
+### Moteur local (http://localhost:9000)
+
+L'extension tourne aussi sur l'instance locale du jeu (docker, cf. `aoo-engine`),
+mais elle n'y remonte **que la carte** : le décor arpenté, jamais les positions,
+ni les stats, ni les forums, ni les missives (tout le reste y est de la donnée
+de dev). Une seule joueuse y est suivie, `LOCAL_ENGINE_PLAYER` dans
+`background.js` ; toute autre persona repart sans rien envoyer. Les relevés
+partent avec l'en-tête `X-AOO-Source: local-engine`, que le tracker refuse
+partout ailleurs que sur l'ingestion de carte (cf. `middleware.ts` et
+`lib/api.ts` dans aoo-tracker).
+
 ---
 
 ## 🛠️ Installation

@@ -1,11 +1,34 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login Status</title>
+  <meta charset="utf-8">
+  <title>Age of Olympia Tracker</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 10px; }
-    img { max-width: 100px; border-radius: 50%; }
-    button { margin-top: 10px; display: block; }
+    body { font-family: Arial, sans-serif; padding: 10px; min-width: 240px; }
+    h3 { margin: 0 0 6px; }
+    h4 { margin: 0 0 10px; }
+    button {
+      margin-top: 6px;
+      display: block;
+      width: 100%;
+      padding: 6px 8px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #status-message {
+      margin-top: 10px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      min-height: 16px;
+    }
+    .status-info { background: #eef; color: #224; }
+    .status-success { background: #dfd; color: #060; }
+    .status-error { background: #fdd; color: #800; }
+    .status-pending { background: #ffd; color: #660; }
+    .form-group { margin-top: 12px; }
+    .form-group label { display: block; font-size: 12px; margin-bottom: 4px; }
+    .form-group select { width: 100%; padding: 4px; }
   </style>
 </head>
 <body>
@@ -14,21 +37,33 @@
   <div id="player-info" style="display: none;">
     <h4>Player: <span id="player-name"></span></h4>
   </div>
-  <button id="fetchAttributes">Fetch Attributes</button>
-  <button id="fetchRankings">Fetch Rankings</button>
-  <button id="fetchLogs">Fetch Logs</button>
-  <button id="fetchAllCharacters">Fetch All Characters</button>
-  <button id="fetchForumPrivate">Fetch Forum Private</button>
-  <button id="fetchForumRP">Fetch Forum RP</button>
-  <button id="fetchMap">Fetch Map</button>
-  <div class="form-group mt-3">
-    <label for="logLevel">Niveau de log:</label>
-    <select id="logLevel" class="form-control">
+
+  <button id="fetchAll" data-action="FETCH_ALL"><strong>Fetch All</strong></button>
+  <button id="fetchAttributes" data-action="FETCH_ATTRIBUTES">Fetch Attributes</button>
+  <button id="fetchRankings" data-action="FETCH_RANKINGS">Fetch Rankings</button>
+  <button id="fetchLogs" data-action="FETCH_LOGS">Fetch Logs</button>
+  <button id="fetchAllCharacters" data-action="FETCH_ALL_CHARACTERS">Fetch All Characters</button>
+  <button id="fetchForumPrivate" data-action="FETCH_FORUM_PRIVATE">Fetch Forum Private</button>
+  <button id="fetchForumRP" data-action="FETCH_FORUM_RP">Fetch Forum RP</button>
+  <button id="fetchForumHRP" data-action="FETCH_FORUM_HRP">Fetch Forum HRP</button>
+  <button id="fetchMissives" data-action="FETCH_MISSIVES">Fetch Missives</button>
+  <button id="fetchForumsFull" data-action="FETCH_FORUMS_FULL">Fetch Forums (complet, lent)</button>
+  <button id="fetchMap" data-action="FETCH_MAP">Fetch Map</button>
+  <button id="fetchMapMdj" data-action="FETCH_MAP_MDJ">Fetch Map MDJ</button>
+  <button id="fetchLogsMdj" data-action="FETCH_LOGS_MDJ">Fetch MDJ Logs</button>
+
+  <div id="status-message"></div>
+
+  <div class="form-group">
+    <label for="logLevel">Niveau de log</label>
+    <select id="logLevel">
       <option value="error">Erreurs uniquement</option>
+      <option value="warn">Warn</option>
       <option value="info">Info</option>
       <option value="debug">Debug</option>
     </select>
   </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

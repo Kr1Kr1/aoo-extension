@@ -1,110 +1,103 @@
-chrome.runtime.sendMessage({ type: "GET_LOGIN_STATUS" }, (response) => {
-    console.log("Login status response:", response);
-    const statusDiv = document.getElementById("status");
-    const playerInfoDiv = document.getElementById("player-info");
-    const playerNameSpan = document.getElementById("player-name");
-  
-    if (response?.loggedIn) {
-      statusDiv.style.display = "none";
-      playerInfoDiv.style.display = "block";
-      playerNameSpan.textContent = response.playerName || "Unknown Player";
-    } else {
-      statusDiv.textContent = "User not logged in.";
-      playerInfoDiv.style.display = "none";
-    }
+const statusDiv = document.getElementById("status");
+const playerInfoDiv = document.getElementById("player-info");
+const playerNameSpan = document.getElementById("player-name");
+const statusMessage = document.getElementById("status-message");
+const logLevelSelect = document.getElementById("logLevel");
+const actionButtons = Array.from(document.querySelectorAll("button[data-action]"));
 
+function setStatusMessage(text, kind = "info") {
+  statusMessage.textContent = text;
+  statusMessage.className = text ? `status-${kind}` : "";
+}
+
+function setButtonsDisabled(disabled) {
+  actionButtons.forEach((btn) => {
+    btn.disabled = disabled;
   });
+}
 
-// Fetch attributes
-document.getElementById("fetchAttributes").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "FETCH_ATTRIBUTES" }, (response) => {
-    if (!response) {
-      console.error("[popup.js] No response received");
+function summarize(action, result) {
+  if (!result || result.error) return null;
+  switch (action) {
+    case "FETCH_LOGS":
+      return `Logs envoyés (${result.count})`;
+    case "FETCH_RANKINGS":
+      return `Classement envoyé (${result.count})`;
+    case "FETCH_ALL_CHARACTERS":
+      return `Personnages envoyés (${result.count})`;
+    case "FETCH_FORUM_PRIVATE":
+    case "FETCH_FORUM_RP":
+    case "FETCH_FORUM_HRP":
+      return `Forums envoyés (${result.count})`;
+    case "FETCH_MISSIVES":
+      return `Missives envoyées (${result.count})`;
+    case "FETCH_FORUMS_FULL":
+      if (result.failed?.length) {
+        return `Forums (complet) : ${result.count}/${result.total} (échecs: ${result.failed.join(", ")})`;
+      }
+      return `Forums (complet) : ${result.count}/${result.total}`;
+    case "FETCH_MAP":
+      return "Carte envoyée";
+    case "FETCH_MAP_MDJ":
+      return `MDJ perception : ${result.count}/${result.total}`;
+    case "FETCH_LOGS_MDJ":
+      return `MDJ logs : ${result.count}/${result.total}`;
+    case "FETCH_ATTRIBUTES":
+      return "Caractéristiques envoyées";
+    case "FETCH_ALL":
+      if (result.failed?.length) {
+        return `Fetch All: ${result.count}/${result.total} (échecs: ${result.failed.join(", ")})`;
+      }
+      return `Fetch All: ${result.count}/${result.total}`;
+    default:
+      return "OK";
+  }
+}
+
+function sendAction(action, label) {
+  setButtonsDisabled(true);
+  setStatusMessage(`${label} en cours…`, "pending");
+  chrome.runtime.sendMessage({ type: action }, (response) => {
+    setButtonsDisabled(false);
+    if (chrome.runtime.lastError) {
+      setStatusMessage(`Erreur: ${chrome.runtime.lastError.message}`, "error");
       return;
     }
-    
-    if (response.error) {
-      console.error("[popup.js] Error fetching attributes:", response.error);
-      return;
-    }
-    console.log("[popup.js] Attributes fetched:", response.attributes);
-  });
-});
-
-// Fetch events
-document.getElementById("fetchLogs").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "FETCH_LOGS" });
-});
-
-// Fetch all characters
-document.getElementById("fetchAllCharacters").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "FETCH_ALL_CHARACTERS" });
-  console.log("[popup.js] Triggered FETCH_ALL_CHARACTERS");
-});
-
-// Fetch Forum Private
-document.getElementById("fetchForumPrivate").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "FETCH_FORUM_PRIVATE" }, (response) => {
-    if (response.error) {
-      console.error("[popup.js] Error fetching Forum Private:", response.error);
-      alert("Failed to fetch Forum Private. Check console for details.");
-    } else {
-      console.log("[popup.js] Forum Private fetched:", response.forums);
-      alert("Forum Private data fetched successfully. Check console for details.");
-    }
-  });
-});
-
-// Fetch Forum RP
-document.getElementById("fetchForumRP").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "FETCH_FORUM_RP" }, (response) => {
-    if (response.error) {
-      console.error("[popup.js] Error fetching Forum RP:", response.error);
-      alert("Failed to fetch Forum RP. Check console for details.");
-    } else {
-      console.log("[popup.js] Forum RP fetched:", response.forums);
-      alert("Forum RP data fetched successfully. Check console for details.");
-    }
-  });
-});
-
-// Fetch Map
-document.getElementById("fetchMap").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "FETCH_MAP" }, (response) => {
     if (response?.error) {
-      console.error("[popup.js] Error fetching map data:", response.error);
-    } else {
-      console.log("[popup.js] Map data fetched successfully");
+      setStatusMessage(`Échec: ${response.error}`, "error");
+      console.error(`[popup] ${action} failed:`, response.error);
+      return;
     }
+    setStatusMessage(summarize(action, response) || "OK", "success");
+    console.log(`[popup] ${action} result:`, response);
   });
+}
+
+// Login status
+chrome.runtime.sendMessage({ type: "GET_LOGIN_STATUS" }, (response) => {
+  if (chrome.runtime.lastError) {
+    statusDiv.textContent = "Erreur de communication avec le background.";
+    return;
+  }
+  if (response?.loggedIn) {
+    statusDiv.style.display = "none";
+    playerInfoDiv.style.display = "block";
+    playerNameSpan.textContent = response.playerName || "Unknown Player";
+  } else {
+    statusDiv.textContent = "Utilisateur non connecté.";
+    playerInfoDiv.style.display = "none";
+  }
 });
 
-// Fetch Reputation: removed. Reputation is now fetched automatically during 'Fetch All Characters'.
-
-// Initialize log level selector
-document.addEventListener('DOMContentLoaded', () => {
-  const logLevelSelect = document.getElementById('logLevel');
-  
-  // Load current log level
-  chrome.storage.sync.get(['logLevel'], (result) => {
-    logLevelSelect.value = result.logLevel || 'info';
-  });
-
-  // Save log level changes
-  logLevelSelect.addEventListener('change', (e) => {
-    chrome.storage.sync.set({ logLevel: e.target.value });
-  });
+// Wire action buttons
+actionButtons.forEach((btn) => {
+  btn.addEventListener("click", () => sendAction(btn.dataset.action, btn.textContent.trim()));
 });
 
-// Fetch Rankings
-document.getElementById("fetchRankings").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "FETCH_RANKINGS" }, (response) => {
-    if (response.error) {
-      console.error("[popup.js] Error fetching rankings:", response.error);
-      alert("Failed to fetch rankings. Check console for details.");
-    } else {
-      console.log("[popup.js] Rankings fetched:", response.rankings);
-      alert("Rankings data fetched successfully. Check console for details.");
-    }
-  });
+// Log level selector
+chrome.storage.sync.get(["logLevel"], (result) => {
+  logLevelSelect.value = result.logLevel || "info";
+});
+logLevelSelect.addEventListener("change", (e) => {
+  chrome.storage.sync.set({ logLevel: e.target.value });
 });
