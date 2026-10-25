@@ -1,0 +1,8 @@
+name: aoo-extension
+category: games
+subcategory: age-of-olympia
+status: active
+kind: extension
+tech: [javascript, chrome-mv3]
+description: Extension Chrome MV3 « Age of Olympia Tracker » qui scrape les pages du jeu et pousse les données vers aoo-tracker sur localhost:3001
+schedule: null
